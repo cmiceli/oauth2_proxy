@@ -87,21 +87,17 @@ func (u *UpstreamProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func NewReverseProxy(target *url.URL) (proxy *httputil.ReverseProxy) {
 	return httputil.NewSingleHostReverseProxy(target)
 }
-func setProxyUpstreamHostHeader(proxy *httputil.ReverseProxy, target *url.URL) {
+func setProxyDirector(proxy *httputil.ReverseProxy, target *url.URL, o *Options) {
 	director := proxy.Director
 	proxy.Director = func(req *http.Request) {
 		director(req)
 		// use RequestURI so that we aren't unescaping encoded slashes in the request path
-		req.Host = target.Host
-		req.URL.Opaque = req.RequestURI
-		req.URL.RawQuery = ""
-	}
-}
-func setProxyDirector(proxy *httputil.ReverseProxy) {
-	director := proxy.Director
-	proxy.Director = func(req *http.Request) {
-		director(req)
-		// use RequestURI so that we aren't unescaping encoded slashes in the request path
+		if o.PassHostHeader {
+			req.Host = target.Host
+		}
+		if o.RewritePath {
+			req.URL.Path = strings.TrimPrefix(req.URL.Path, target.Path)
+		}
 		req.URL.Opaque = req.RequestURI
 		req.URL.RawQuery = ""
 	}
@@ -124,11 +120,7 @@ func NewOAuthProxy(opts *Options, validator func(string) bool) *OAuthProxy {
 			u.Path = ""
 			log.Printf("mapping path %q => upstream %q", path, u)
 			proxy := NewReverseProxy(u)
-			if !opts.PassHostHeader {
-				setProxyUpstreamHostHeader(proxy, u)
-			} else {
-				setProxyDirector(proxy)
-			}
+			setProxyDirector(proxy, u, opts)
 			serveMux.Handle(path,
 				&UpstreamProxy{u.Host, proxy, auth})
 		case "file":
